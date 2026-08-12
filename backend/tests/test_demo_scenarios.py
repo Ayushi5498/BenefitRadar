@@ -3,14 +3,18 @@ End-to-end smoke test for the 3 guaranteed demo scenarios.
 
 Requires:
   1. MongoDB running on localhost:27017
-  2. The demo seed script already run:
-       cd backend && python -m app.scripts.seed_demo_scenarios
-  3. The FastAPI server running on port 8000:
+  2. The FastAPI server running on port 8000:
        cd backend && uvicorn app.main:app --port 8000
+
+The session-scoped fixture below automatically runs the demo seed script
+before the test session starts, so the database is always in a clean,
+known state regardless of what ran before.
 
 Run with:
     cd backend
     python -m pytest tests/test_demo_scenarios.py -v
+  or as part of the full suite:
+    python -m pytest tests/ -v
 
 What each test proves:
   test_scenario_a  — Pipeline detects a qualifying electronics purchase and
@@ -23,10 +27,37 @@ What each test proves:
 """
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import httpx
 import pytest
+
+# ── Auto-seed before the session so the DB is always in a known state ─────────
+
+@pytest.fixture(scope="session", autouse=True)
+def seed_demo_database():
+    """
+    Run the demo seed script once before any test in this file executes.
+    This ensures the database is wiped and repopulated with the exact
+    scenario data regardless of what ran before, making the suite
+    repeatable whether run alone or as part of `pytest tests/`.
+    """
+    result = subprocess.run(
+        [sys.executable, "-m", "app.scripts.seed_demo_scenarios"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    if result.returncode != 0:
+        pytest.fail(
+            f"Demo seed script failed:\n{result.stdout}\n{result.stderr}"
+        )
+    # Reload the state file so tests pick up fresh IDs
+    global _STATE
+    _STATE = json.loads(_STATE_FILE.read_text())
+
 
 # ── Load IDs written by the seed script ──────────────────────────────────────
 _STATE_FILE = Path(__file__).resolve().parents[2] / "demo_state.json"
